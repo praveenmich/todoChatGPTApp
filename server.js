@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
 const todoHtml = readFileSync("public/todo-widget.html", "utf8");
@@ -93,10 +94,21 @@ function createTodoServer() {
   return server;
 }
 
-const port = Number(process.env.PORT ?? 8787);
-const MCP_PATH = "/mcp";
+// Check if running in stdio mode (deployment environment)
+const isStdioMode = process.env.MCP_TRANSPORT === "stdio";
 
-const httpServer = createServer(async (req, res) => {
+if (isStdioMode) {
+  // Stdio transport for deployed MCP servers
+  const server = createTodoServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error("MCP server started in stdio mode");
+} else {
+  // HTTP transport for local development
+  const port = Number(process.env.PORT ?? 8787);
+  const MCP_PATH = "/mcp";
+
+  const httpServer = createServer(async (req, res) => {
   if (!req.url) {
     res.writeHead(400).end("Missing URL");
     return;
@@ -140,21 +152,22 @@ const httpServer = createServer(async (req, res) => {
       await server.connect(transport);
       await transport.handleRequest(req, res);
     } catch (error) {
-      console.error("Error handling MCP request:", error);
-      if (!res.headersSent) {
-        res.writeHead(500).end("Internal server error");
-      }
+  httpServer.on("error", (err) => {
+    if (err && err.code === "EADDRINUSE") {
+      console.error(
+        `Port ${port} is already in use. Try: PORT=<free-port> node server.js`
+      );
+      process.exit(1);
     }
-    return;
-  }
+    console.error("HTTP server error:", err);
+  });
 
-  res.writeHead(404).end("Not Found");
-});
-
-httpServer.on("error", (err) => {
-  if (err && err.code === "EADDRINUSE") {
-    console.error(
-      `Port ${port} is already in use. Try: PORT=<free-port> node server.js`
+  httpServer.listen(port, () => {
+    console.log(
+      `Todo MCP server listening on http://localhost:${port}${MCP_PATH}`
+    );
+  });
+}   `Port ${port} is already in use. Try: PORT=<free-port> node server.js`
     );
     process.exit(1);
   }
