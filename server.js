@@ -5,6 +5,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+// Initialize stdio transport for deployment
+const transport = new StdioServerTransport();
+
 const todoHtml = readFileSync("public/todo-widget.html", "utf8");
 
 const addTodoInputSchema = {
@@ -94,88 +97,94 @@ function createTodoServer() {
   return server;
 }
 
-// Check if running in stdio mode (deployment environment)
-const isStdioMode = process.env.MCP_TRANSPORT === "stdio";
-
-if (isStdioMode) {
-  // Stdio transport for deployed MCP servers
+// Start the server
+async function main() {
   const server = createTodoServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("MCP server started in stdio mode");
-} else {
-  // HTTP transport for local development
-  const port = Number(process.env.PORT ?? 8787);
-  const MCP_PATH = "/mcp";
+  
+  // Check if running in HTTP mode (local development)
+  const useHttpMode = process.env.USE_HTTP === "true";
+  
+  if (useHttpMode) {
+    // HTTP transport for local development
+    const port = Number(process.env.PORT ?? 8787);
+    const MCP_PATH = "/mcp";
 
-  const httpServer = createServer(async (req, res) => {
-  if (!req.url) {
-    res.writeHead(400).end("Missing URL");
-    return;
-  }
+    const httpServer = createServer(async (req, res) => {
+      if (!req.url) {
+        res.writeHead(400).end("Missing URL");
+        return;
+      }
 
-  const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+      const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
 
-  if (req.method === "OPTIONS" && url.pathname === MCP_PATH) {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-      "Access-Control-Allow-Headers": "content-type, mcp-session-id",
-      "Access-Control-Expose-Headers": "Mcp-Session-Id",
+      if (req.method === "OPTIONS" && url.pathname === MCP_PATH) {
+        res.writeHead(204, {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+          "Access-Control-Allow-Headers": "content-type, mcp-session-id",
+          "Access-Control-Expose-Headers": "Mcp-Session-Id",
+        });
+        res.end();
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/") {
+        res.writeHead(200, { "content-type": "text/plain" }).end("Todo MCP server");
+        return;
+      }
+
+      const MCP_METHODS = new Set(["POST", "GET", "DELETE"]);
+      if (url.pathname === MCP_PATH && req.method && MCP_METHODS.has(req.method)) {
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+
+        const httpTransport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+          enableJsonResponse: true,
+        });
+
+        res.on("close", () => {
+          httpTransport.close();
+        });
+
+        try {
+          await server.connect(httpTransport);
+          await httpTransport.handleRequest(req, res);
+        } catch (error) {
+          console.error("Error handling MCP request:", error);
+          if (!res.headersSent) {
+            res.writeHead(500).end("Internal server error");
+          }
+        }
+        return;
+      }
+
+      res.writeHead(404).end("Not Found");
     });
-    res.end();
-    return;
-  }
 
-  if (req.method === "GET" && url.pathname === "/") {
-    res.writeHead(200, { "content-type": "text/plain" }).end("Todo MCP server");
-    return;
-  }
-
-  const MCP_METHODS = new Set(["POST", "GET", "DELETE"]);
-  if (url.pathname === MCP_PATH && req.method && MCP_METHODS.has(req.method)) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
-
-    const server = createTodoServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined, // stateless mode
-      enableJsonResponse: true,
+    httpServer.on("error", (err) => {
+      if (err && err.code === "EADDRINUSE") {
+        console.error(
+          `Port ${port} is already in use. Try: PORT=<free-port> USE_HTTP=true node server.js`
+        );
+        process.exit(1);
+      }
+      console.error("HTTP server error:", err);
     });
 
-    res.on("close", () => {
-      transport.close();
-      server.close();
-    });
-
-    try {
-      await server.connect(transport);
-      await transport.handleRequest(req, res);
-    } catch (error) {
-  httpServer.on("error", (err) => {
-    if (err && err.code === "EADDRINUSE") {
-      console.error(
-        `Port ${port} is already in use. Try: PORT=<free-port> node server.js`
+    httpServer.listen(port, () => {
+      console.log(
+        `Todo MCP server listening on http://localhost:${port}${MCP_PATH}`
       );
-      process.exit(1);
-    }
-    console.error("HTTP server error:", err);
-  });
-
-  httpServer.listen(port, () => {
-    console.log(
-      `Todo MCP server listening on http://localhost:${port}${MCP_PATH}`
-    );
-  });
-}   `Port ${port} is already in use. Try: PORT=<free-port> node server.js`
-    );
-    process.exit(1);
+    });
+  } else {
+    // Stdio transport for deployed MCP servers (default)
+    await server.connect(transport);
+    console.error("MCP server started in stdio mode");
   }
-  console.error("HTTP server error:", err);
-});
+}
 
-httpServer.listen(port, () => {
-  console.log(
-    `Todo MCP server listening on http://localhost:${port}${MCP_PATH}`
-  );
+main().catch((err) => {
+  console.error("Fatal error:", err);
+  process.exit(1);
 });

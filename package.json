@@ -2,8 +2,9 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "start:8787": "PORT=8787 node server.js",
-    "start:8788": "PORT=8788 node server.js",
+    "start:http": "USE_HTTP=true PORT=8787 node server.js",
+    "start:8787": "USE_HTTP=true PORT=8787 node server.js",
+    "start:8788": "USE_HTTP=true PORT=8788 node server.js",
     "inspect": "MCP_PORT=${MCP_PORT:-8787} CLIENT_PORT=${CLIENT_PORT:-6274} SERVER_PORT=${SERVER_PORT:-6277} npx @modelcontextprotocol/inspector --transport http --server-url http://localhost:$MCP_PORT/mcp",
     "inspect:5001": "MCP_PORT=${MCP_PORT:-8787} CLIENT_PORT=5001 SERVER_PORT=5577 npx @modelcontextprotocol/inspector --transport http --server-url http://localhost:$MCP_PORT/mcp",
     "inspect:8788-5001": "MCP_PORT=8788 CLIENT_PORT=5001 SERVER_PORT=5578 npx @modelcontextprotocol/inspector --transport http --server-url http://localhost:$MCP_PORT/mcp"
